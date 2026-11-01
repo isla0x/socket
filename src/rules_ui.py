@@ -2,7 +2,7 @@
 import json
 import re
 from pathlib import Path
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
     QTableWidgetItem, QComboBox, QCheckBox, QLineEdit, QPushButton, QDialogButtonBox,
     QFileDialog, QHeaderView, QAbstractItemView)
@@ -10,6 +10,7 @@ from packet import validate_rules, compile_rules
 
 
 class RulesDialog(QDialog):
+    deleted = Signal(object)
     def __init__(self, rules, parent=None, direction='RX', contains='', embedded=False):
         super().__init__(parent)
         self.embedded = embedded
@@ -165,8 +166,23 @@ class RulesDialog(QDialog):
             self.error.setText(str(exc))
 
     def delete_selected(self):
-        for row in sorted({index.row() for index in self.table.selectionModel().selectedRows()}, reverse=True):
-            self.table.removeRow(row)
+        rows = {index.row() for index in self.table.selectionModel().selectedRows()}
+        if not rows:
+            return
+        if not self.embedded:
+            for row in sorted(rows, reverse=True):
+                self.table.removeRow(row)
+            self.error.setText('삭제 변경 미저장 · 저장해야 적용됩니다. 취소하면 유지됩니다.')
+            return
+        try:
+            remaining = validate_rules({'rules':[rule for i,rule in enumerate(self.collect()) if i not in rows]})
+            compile_rules(remaining,self.encoding)
+        except (ValueError,UnicodeError) as exc:
+            self.error.setText('삭제를 적용하지 않았습니다. 나머지 규칙을 먼저 수정하세요: '+str(exc))
+            return
+        self.populate(remaining)
+        self.deleted.emit(remaining)
+        self.error.setText('삭제 적용 완료 · 고급 설정과 실제 규칙도 함께 갱신했습니다.')
 
     def move(self, step):
         row = self.table.currentRow()

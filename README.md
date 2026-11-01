@@ -1,6 +1,6 @@
 # Socket Inspector
 
-Windows에서 Android 앱의 Frida 이벤트를 조회하고, 거래 코드·방향·문자열 조건에 따라 자동 치환하는 데스크톱 도구입니다. 현재 소스 기준 버전은 **3.2.3**입니다. 모든 앱의 통신을 자동 해석하는 범용 프록시는 아닙니다.
+Windows에서 Android 앱의 Frida 이벤트를 조회하고, 거래 코드·방향·문자열 조건에 따라 자동 치환하는 데스크톱 도구입니다. 현재 소스 기준 버전은 **3.2.4**입니다. 모든 앱의 통신을 자동 해석하는 범용 프록시는 아닙니다.
 
 ## 기능
 
@@ -37,6 +37,8 @@ Frida Python 클라이언트는 16.2.1로 고정되어 있습니다. 실제 단�
 
 ## 규칙
 
+오른쪽 표의 선택 삭제는 남은 규칙을 검증한 뒤 고급 설정과 실제 적용 규칙에도 즉시 반영합니다. 마지막 규칙을 삭제하면 자동 치환이 OFF가 됩니다. 이미 OFF였던 상태는 유지합니다. 별도 고급 창에서는 저장/취소 방식을 유지합니다.
+
 규칙 표에 방향·거래 코드/포함 조건·찾을 값·바꿀 값을 입력하고 추가한 뒤 **저장 후 자동 치환 켜기**를 누릅니다. 이미 처리된 패킷이 아닌 새로 발생하는 패킷부터 적용됩니다. `examples/rules.example.json`은 비활성 예시입니다.
 
 포함 조건은 실제 패킷에 존재해야 합니다. 요청에만 있는 문자열을 응답 방향으로 설정하면 적용되지 않습니다. 규칙은 위에서부터 순차 적용하며, 조건 문자열 자체를 변경하는 규칙은 순서를 고려해야 합니다.
@@ -55,6 +57,7 @@ Set-Location src
 ..\.venv\Scripts\python.exe test_inline_rules.py
 ..\.venv\Scripts\python.exe test_profiles.py
 ..\.venv\Scripts\python.exe test_diagnostic.py
+..\.venv\Scripts\python.exe test_rule_deletion.py
 node test-shinyoung.cjs
 ```
 

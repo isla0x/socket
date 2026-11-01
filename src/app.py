@@ -132,7 +132,7 @@ class JsonDialog(QDialog):
 class Window(QMainWindow):
     def __init__(self, start_demo=True):
         super().__init__()
-        self.setWindowTitle('Socket Inspector v3.2.3 — 요청 / 응답')
+        self.setWindowTitle('Socket Inspector v3.2.4 — 규칙 삭제 동기화')
         self.profile_state = {}
         self.active_profile = 'kyobo'
         self.resize(1720, 960)
@@ -463,6 +463,7 @@ class Window(QMainWindow):
             split.addWidget(data_area)
             self.inline_rules = RulesDialog(self.rules, self, embedded=True)
             self.inline_rules.accepted.connect(lambda: self.apply_rule_list(self.inline_rules.result_value))
+            self.inline_rules.deleted.connect(lambda rules: self.apply_rule_list(rules, activate=False))
             split.addWidget(self.inline_rules)
             split.setChildrenCollapsible(False)
             split.setSizes([560,560])
@@ -1213,13 +1214,15 @@ class Window(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.apply_rule_list(dialog.result_value)
 
-    def apply_rule_list(self, rules):
+    def apply_rule_list(self, rules, activate=True):
         self.rules = rules
-        self.capture_enabled.setChecked(True)
-        self.intercept.setChecked(False)
-        self.allow_resize.setChecked(any(r['enabled'] and r['allow_resize'] for r in self.rules))
+        if activate:
+            self.capture_enabled.setChecked(True)
+            self.intercept.setChecked(False)
+            self.allow_resize.setChecked(any(r['enabled'] and r['allow_resize'] for r in self.rules))
         self.refresh_rule_count()
-        self.auto_rules.setChecked(any(r['enabled'] for r in self.rules))
+        if activate:
+            self.auto_rules.setChecked(any(r['enabled'] for r in self.rules))
         self.configure()
         self.inline_rules.populate(self.rules)
         self.inline_rules.error.setText('저장 완료 · 이후 패킷부터 적용' if self.auto_rules.isChecked() else '저장 완료 · 자동 치환 OFF')
