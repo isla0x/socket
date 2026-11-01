@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "name": "DEMO 요청 문자열 변경",
+      "direction": "TX",
+      "contains": "DEMO001Q1",
+      "kind": "text",
+      "encoding": "cp949",
+      "find_text": "user01",
+      "replace_text": "user002",
+      "allow_resize": true,
+      "all": true,
+      "enabled": false
+    }
+  ]
+}
