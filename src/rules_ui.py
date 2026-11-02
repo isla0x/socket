@@ -27,6 +27,13 @@ class RulesDialog(QDialog):
         if embedded:
             hint.setText('규칙 추가 → 저장 · 여러 거래 코드는 쉼표로 구분 · 표에서 수정/삭제')
         layout.addWidget(hint)
+        modes = QHBoxLayout()
+        self.overwrite = QCheckBox('새 규칙: 원본 덮어쓰기 · 길이 유지 · 첫 1개')
+        self.overwrite.setChecked(True)
+        modes.addWidget(self.overwrite)
+        self.add_button(modes,'기존 규칙 전환',self.convert_overwrite)
+        modes.addStretch()
+        layout.addLayout(modes)
         row = QHBoxLayout()
         self.direction = self.combo(['RX', 'TX', 'ANY'], direction)
         row.addWidget(self.direction)
@@ -40,8 +47,8 @@ class RulesDialog(QDialog):
             row.addWidget(widget, 1)
         self.add_button(row, '추가', self.add_quick)
         layout.addLayout(row)
-        self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(['사용', '방향', '포함 조건 / 거래 코드', '찾을 값', '바꿀 값', '모두', '길이 변경', '형식'])
+        self.table = QTableWidget(0, 9)
+        self.table.setHorizontalHeaderLabels(['사용', '방향', '포함 조건 / 거래 코드', '찾을 값', '바꿀 값', '모두', '길이 변경', '형식','방식'])
         if embedded:
             self.table.setHorizontalHeaderItem(2, QTableWidgetItem('거래 코드 / 조건'))
             for col in (5, 6, 7):
@@ -51,7 +58,7 @@ class RulesDialog(QDialog):
         self.table.setAlternatingRowColors(True)
         if embedded:
             self.table.setMinimumHeight(110)
-        for col in range(8):
+        for col in range(9):
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch if col in (2, 3, 4) else QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.table, 1)
         actions = QHBoxLayout()
@@ -84,7 +91,7 @@ class RulesDialog(QDialog):
     @staticmethod
     def combo(values, selected):
         widget = QComboBox()
-        labels = {'TX':'요청', 'RX':'응답', 'ANY':'요청 + 응답'}
+        labels = {'TX':'요청', 'RX':'응답', 'ANY':'요청 + 응답','overwrite':'원본 덮어쓰기','replace':'일반 치환'}
         for value in values:
             widget.addItem(labels.get(value,value),value)
         widget.setCurrentIndex(widget.findData(selected))
@@ -122,6 +129,7 @@ class RulesDialog(QDialog):
             self.table.setItem(row, col, item)
         fmt = 'hex' if kind == 'hex' else rule.get('encoding', 'cp949')
         self.table.setCellWidget(row, 7, self.combo(['cp949', 'utf-8', 'ascii', 'hex'], fmt))
+        self.table.setCellWidget(row, 8, self.combo(['overwrite','replace'],rule.get('mode','replace')))
 
     def collect(self):
         rules = []
@@ -132,6 +140,7 @@ class RulesDialog(QDialog):
             for key in ('find_text', 'replace_text', 'find_hex', 'replace_hex'):
                 rule.pop(key, None)
             rule.update(direction=self.table.cellWidget(row, 1).currentData(),
+                        mode=self.table.cellWidget(row,8).currentData(),
                         contains=self.table.item(row, 2).text(), kind=kind,
                         encoding='cp949' if kind == 'hex' else fmt)
             rule['find_text' if kind == 'text' else 'find_hex'] = self.table.item(row, 3).text()
@@ -156,7 +165,7 @@ class RulesDialog(QDialog):
                 raise ValueError('적용할 거래 코드 / 포함 조건을 입력하세요.')
             added = validate_rules({'rules': [dict(name=code + ' ' + before + ' → ' + after,
                 direction=self.direction.currentData(), contains=code, kind='text', encoding='cp949',
-                find_text=before, replace_text=after, allow_resize=resize, all=True, enabled=True) for code in codes if code]})
+                find_text=before, replace_text=after, allow_resize=resize, all=True, enabled=True,mode='overwrite' if self.overwrite.isChecked() else 'replace') for code in codes if code]})
             if self.table.rowCount() + len(added) > 100:
                 raise ValueError('규칙은 최대 100개입니다.')
             for rule in added:
@@ -183,6 +192,13 @@ class RulesDialog(QDialog):
         self.populate(remaining)
         self.deleted.emit(remaining)
         self.error.setText('삭제 적용 완료 · 고급 설정과 실제 규칙도 함께 갱신했습니다.')
+
+    def convert_overwrite(self):
+        for row in range(self.table.rowCount()):
+            self.table.cellWidget(row,8).setCurrentIndex(0)
+            self.table.cellWidget(row,5).setChecked(False)
+            self.table.cellWidget(row,6).setChecked(False)
+        self.error.setText('원본 덮어쓰기로 전환했습니다. 저장해야 적용됩니다.')
 
     def move(self, step):
         row = self.table.currentRow()

@@ -9,6 +9,7 @@ from app import Window
 
 app = QApplication([])
 d = RulesDialog([])
+d.overwrite.setChecked(False)
 d.codes.setText('DDAZ00032, DDAZ80028, DDAD20008, DEZF_9901')
 d.direction.setCurrentIndex(d.direction.findData('TX'))
 d.before.setText('user01')

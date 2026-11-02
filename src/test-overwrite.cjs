@@ -1,0 +1,22 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync(__dirname+'/agent.js','utf8');
+const common=source.split('if (settings.testMode) {')[0];
+const replacement=source.slice(source.indexOf('    function replacement('),source.indexOf('    function install()'));
+const bytes=s=>Array.from(Buffer.from(s));
+const events=[];
+const rules=[{name:'legacy',direction:'TX',contains:bytes('TRTEST'),before:bytes('00user01'),after:bytes('00user0001'),all:true,mode:'overwrite'}];
+const context=vm.createContext({BOOT_CONFIG:{rules:true,compiledRules:rules,lengthFields:[{direction:'ANY',stage_contains:'',type:'ascii',offset:0,width:3,adjust:0}]},
+  send:(m,d)=>events.push(m),recv:()=>{},setInterval:()=>{},Process:{getCurrentThreadId:()=>1,id:1},Java:{array:(_,a)=>a}});
+vm.runInContext(common+replacement+'\nglobalThis.test={gate,replacement,rewrite};',context);
+const raw=bytes('TRTEST|00user01    |NEXT|00user01');
+const outcome=context.test.gate(new Uint8Array(raw),'TX','makePacketArray','',true);
+assert.equal(Buffer.from(outcome.bytes).toString(),'TRTEST|00user0001  |NEXT|00user01');
+assert.equal(outcome.bytes.length,raw.length);
+assert(outcome.inPlace);
+const original=raw.slice();
+assert.strictEqual(context.test.replacement(outcome,original),original);
+assert.equal(Buffer.from(original).toString(),'TRTEST|00user0001  |NEXT|00user01');
+assert.throws(()=>context.test.rewrite(new Uint8Array(bytes('abc')),bytes('abc'),bytes('abcdef'),true,true,'overwrite'),/boundary/);
+const normal=context.test.rewrite(new Uint8Array(bytes('00user01|NEXT')),bytes('00user01'),bytes('00user0001'),false,true,'replace');
+assert.equal(Buffer.from(normal).toString(),'00user0001|NEXT');
+console.log('PASS: agent first overwrite, header unchanged, same byte-array object updated, overflow guard, normal resize preserved.');

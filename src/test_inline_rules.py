@@ -11,6 +11,7 @@ app.setStyleSheet(STYLE)
 w=Window(start_demo=False)
 w.show();app.processEvents()
 d=w.inline_rules
+d.overwrite.setChecked(False)
 d.direction.setCurrentIndex(d.direction.findData('TX'))
 d.codes.setText('DEMO001Q1')
 d.before.setText('user01');d.after.setText('user002')

@@ -64,8 +64,17 @@ function findBytes(data, needle, from) {
     }
     return -1;
 }
-function rewrite(data, before, after, all, allowResize) {
+function rewrite(data, before, after, all, allowResize, mode) {
     if (!before.length) throw new Error('Empty find pattern');
+    if (mode === 'overwrite') {
+        const at=findBytes(data,before,0);
+        if (at<0) return data;
+        const width=Math.max(before.length,after.length);
+        if (at+width>data.length) throw new Error('Overwrite exceeds packet boundary; original preserved');
+        const output=data.slice();
+        for (let i=0;i<width;i++) output[at+i]=i<after.length?after[i]:32;
+        return output;
+    }
     const positions = [];
     let position = findBytes(data, before, 0);
     while (position !== -1) {
@@ -116,17 +125,17 @@ function gate(bytes, direction, stage, text, mainThread) {
         (!settings.filter || text.indexOf(settings.filter) !== -1);
     // Never block Android's UI thread. Automatic rules run in-process with no PC round trip.
     const held = !!(matches && !mainThread);
-    let prepared = bytes, names = [], ruleError = '';
+    let prepared = bytes, names = [], ruleError = '', overwriteOnly = true;
     if (settings.rules) {
         try {
             (settings.compiledRules || []).forEach(function (r) {
                 if (r.direction !== 'ANY' && r.direction !== direction) return;
                 if (r.contains.length && findBytes(prepared, r.contains, 0) === -1) return;
-                const next = rewrite(prepared, r.before, r.after, r.all, settings.allowResize && r.allowResize);
-                if (next !== prepared) names.push(r.name);
+                const next = rewrite(prepared, r.before, r.after, r.all, settings.allowResize && r.allowResize,r.mode);
+                if (next !== prepared) { names.push(r.name); if(r.mode!=='overwrite') overwriteOnly=false; }
                 prepared = next;
             });
-            if (names.length) prepared = fixLengths(prepared.slice(), direction, stage);
+            if (names.length && !overwriteOnly) prepared = fixLengths(prepared.slice(), direction, stage);
         } catch (e) {
             prepared = bytes; names = []; ruleError = String(e);
             if (!warned.has(ruleError)) { warned.add(ruleError); log('Rule kept original: ' + ruleError); }
@@ -159,7 +168,7 @@ function gate(bytes, direction, stage, text, mainThread) {
         try { operation.wait(); }
         catch (e) { action = 'cancelled'; error = String(e); result = bytes; }
     }
-    return {id, held, recorded, changed, action, bytes: result, original: bytes, error};
+    return {id, held, recorded, changed, action, bytes: result, original: bytes, error,inPlace:changed && overwriteOnly && !held};
 }
 function finish(outcome, applied, failure) {
     if (!outcome || !outcome.recorded || (!outcome.held && !outcome.changed)) return;
@@ -195,7 +204,11 @@ if (settings.testMode) {
         }
         return gate(bytes, direction, stage, text, Java.isMainThread());
     }
-    function replacement(outcome) {
+    function replacement(outcome, original) {
+        if(outcome.inPlace && original.length===outcome.bytes.length) {
+            for(let i=0;i<original.length;i++) original[i]=outcome.bytes[i]>127?outcome.bytes[i]-256:outcome.bytes[i];
+            return original;
+        }
         return Java.array('byte', Array.from(outcome.bytes, b => b > 127 ? b - 256 : b));
     }
     function install() {
@@ -217,7 +230,7 @@ if (settings.testMode) {
                             if (settings.requestSource === 'packet') {
                                 try {
                                     outcome = inspect(info.m_szData.value, 'TX', 'makePacketArray / header+body');
-                                    if (outcome && outcome.action === 'replace') info.m_szData.value = replacement(outcome);
+                                    if (outcome && outcome.action === 'replace') info.m_szData.value = replacement(outcome,info.m_szData.value);
                                     finish(outcome, true, '');
                                 } catch (e) { finish(outcome, false, String(e)); log('Request capture: ' + e); }
                             }
@@ -248,7 +261,7 @@ if (settings.testMode) {
                                     let outcome = null;
                                     try {
                                         outcome = inspect(args[0], 'TX', 'encrypt / body');
-                                        if (outcome && outcome.action === 'replace') args[0] = replacement(outcome);
+                                        if (outcome && outcome.action === 'replace') args[0] = replacement(outcome,args[0]);
                                         finish(outcome, true, '');
                                     } catch (e) { finish(outcome, false, String(e)); log('Encrypt capture: ' + e); }
                                 }
@@ -258,7 +271,7 @@ if (settings.testMode) {
                             let result = original, outcome = null;
                             try {
                                 outcome = inspect(original, 'RX', 'decrypt / plaintext');
-                                if (outcome && outcome.action === 'replace') result = replacement(outcome);
+                                if (outcome && outcome.action === 'replace') result = replacement(outcome,original);
                                 finish(outcome, true, '');
                             } catch (e) { finish(outcome, false, String(e)); log('Response capture: ' + e); }
                             return result;

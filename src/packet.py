@@ -141,6 +141,9 @@ def validate_rules(value) -> list[dict]:
         direction = rule.get('direction', 'ANY')
         kind = rule.get('kind', 'hex')
         encoding = rule.get('encoding', 'cp949')
+        mode = rule.get('mode', 'replace')
+        if mode not in ('replace','overwrite'):
+            raise ValueError('치환 방식은 replace/overwrite입니다.')
         if kind not in ('hex', 'text') or encoding not in ('cp949', 'utf-8', 'ascii'):
             raise ValueError('kind는 hex/text, encoding은 cp949/utf-8/ascii입니다.')
         if kind == 'text':
@@ -154,7 +157,7 @@ def validate_rules(value) -> list[dict]:
             raise ValueError('allow_resize는 true/false입니다.')
         if direction not in ('ANY', 'TX', 'RX') or not before:
             raise ValueError('규칙 방향은 ANY/TX/RX이며 찾기는 비어 있을 수 없습니다.')
-        if len(before) != len(after) and not allow_resize:
+        if len(before) != len(after) and not allow_resize and mode != 'overwrite':
             raise ValueError('길이가 다른 규칙은 allow_resize: true를 설정하세요.')
         if max(len(before), len(after)) > MAX_PACKET:
             raise ValueError('규칙 바이트는 최대 1 MiB입니다.')
@@ -164,8 +167,8 @@ def validate_rules(value) -> list[dict]:
         if type(rule.get('enabled', True)) is not bool or type(rule.get('all', False)) is not bool:
             raise ValueError('enabled와 all은 true/false입니다.')
         normalized = dict(name=str(rule.get('name', '치환'))[:80], direction=direction, contains=contains,
-                          kind=kind, encoding=encoding, allow_resize=allow_resize,
-                          enabled=rule.get('enabled', True), all=rule.get('all', False))
+                          kind=kind, encoding=encoding, allow_resize=allow_resize if mode!='overwrite' else False, mode=mode,
+                          enabled=rule.get('enabled', True), all=rule.get('all', False) if mode!='overwrite' else False)
         if kind == 'text':
             normalized.update(find_text=rule['find_text'], replace_text=rule['replace_text'])
         else:
@@ -174,9 +177,17 @@ def validate_rules(value) -> list[dict]:
     return clean
 
 
-def replace_bytes(data: bytes, before: bytes, after: bytes, replace_all=False, allow_resize=False) -> tuple[bytes, int]:
+def replace_bytes(data: bytes, before: bytes, after: bytes, replace_all=False, allow_resize=False, mode='replace') -> tuple[bytes, int]:
     if not before:
         raise ValueError('찾을 값은 비워 둘 수 없습니다.')
+    if mode == 'overwrite':
+        at = data.find(before)
+        if at < 0:
+            return data,0
+        width = max(len(before),len(after))
+        if at+width > len(data):
+            raise ValueError('덮어쓰기 범위가 패킷 끝을 넘습니다. 원본을 유지합니다.')
+        return data[:at]+after.ljust(width,b' ')+data[at+width:],1
     count = data.count(before) if replace_all else int(before in data)
     if count and len(before) != len(after) and not allow_resize:
         raise ValueError('길이가 다릅니다. 「가변 길이 허용」을 켜거나 고정 폭 필드 편집을 사용하세요.')
@@ -198,7 +209,7 @@ def apply_rules(data: bytes, direction: str, rules: list[dict], encoding: str = 
         else:
             before, after = bytes.fromhex(rule['find_hex']), bytes.fromhex(rule['replace_hex'])
         if before in data:
-            updated, _ = replace_bytes(data, before, after, rule['all'], allow_resize and rule.get('allow_resize', False))
+            updated, _ = replace_bytes(data, before, after, rule['all'], allow_resize and rule.get('allow_resize', False),rule.get('mode','replace'))
             if updated != data:
                 names.append(rule['name'])
             data = updated
@@ -220,7 +231,7 @@ def compile_rules(rules: list[dict], encoding: str) -> list[dict]:
         if total > 65_536:
             raise ValueError('활성 규칙의 찾기·바꾸기 바이트 합계는 최대 64 KiB입니다.')
         compiled.append(dict(name=rule['name'], direction=rule['direction'], before=list(before), after=list(after),
-                             contains=list(contains), all=rule['all'], allowResize=rule.get('allow_resize', False)))
+                             contains=list(contains), all=rule['all'], allowResize=rule.get('allow_resize', False),mode=rule.get('mode','replace')))
     return compiled
 
 

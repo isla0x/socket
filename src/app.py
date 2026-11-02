@@ -132,7 +132,7 @@ class JsonDialog(QDialog):
 class Window(QMainWindow):
     def __init__(self, start_demo=True):
         super().__init__()
-        self.setWindowTitle('Socket Inspector v3.2.4 — 규칙 삭제 동기화')
+        self.setWindowTitle('Socket Inspector v3.2.5 — 원본 덮어쓰기')
         self.profile_state = {}
         self.active_profile = 'kyobo'
         self.resize(1720, 960)
