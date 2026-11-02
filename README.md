@@ -1,6 +1,6 @@
 # Socket Inspector
 
-Windows에서 Android 앱의 Frida 이벤트를 조회하고, 거래 코드·방향·문자열 조건에 따라 자동 치환하는 데스크톱 도구입니다. 현재 소스 기준 버전은 **3.2.5**입니다. 모든 앱의 통신을 자동 해석하는 범용 프록시는 아닙니다.
+Windows에서 Android 앱의 Frida 이벤트를 조회하고, 거래 코드·방향·문자열 조건에 따라 자동 치환하는 데스크톱 도구입니다. 현재 소스 기준 버전은 **3.2.6**입니다. 모든 앱의 통신을 자동 해석하는 범용 프록시는 아닙니다.
 
 ## 기능
 
@@ -37,6 +37,8 @@ Frida Python 클라이언트는 16.2.1로 고정되어 있습니다. 실제 단�
 
 ## 규칙
 
+저장 버튼은 전용 저장 신호로 규칙과 ON 상태를 적용하고, 클릭/검증 실패/활성 규칙 개수를 표시합니다. 저장 후 재연결해도 ON 상태를 유지합니다. 사용 체크가 없는 규칙을 임의로 켜지는 않습니다.
+
 새 규칙은 `mode: overwrite`인 원본 덮어쓰기가 기본입니다. 처음 일치하는 한 곳에 최대 찾기/바꾸기 폭만큼 덮고 짧은 값은 공백으로 채웁니다. 긴 값은 뒤 기존 바이트를 사용하며 전체 길이를 늘리지 않습니다. 경계를 넘으면 원본으로 진행합니다. 교보에서는 원래 byte 배열에 반영하며 덮어쓰기만 적용한 경우 길이 헤더 정의를 실행하지 않습니다. 기존 규칙은 자동 변경하지 않으며, 기존 규칙 전환 후 저장하거나 방식 열을 사용하세요. `mode` 없는 파일은 기존 일반 치환으로 읽습니다.
 
 오른쪽 표의 선택 삭제는 남은 규칙을 검증한 뒤 고급 설정과 실제 적용 규칙에도 즉시 반영합니다. 마지막 규칙을 삭제하면 자동 치환이 OFF가 됩니다. 이미 OFF였던 상태는 유지합니다. 별도 고급 창에서는 저장/취소 방식을 유지합니다.
@@ -60,6 +62,7 @@ Set-Location src
 ..\.venv\Scripts\python.exe test_profiles.py
 ..\.venv\Scripts\python.exe test_diagnostic.py
 ..\.venv\Scripts\python.exe test_rule_deletion.py
+..\.venv\Scripts\python.exe test_save_button.py
 node test-shinyoung.cjs
 node test-overwrite.cjs
 ..\.venv\Scripts\python.exe test_overwrite.py

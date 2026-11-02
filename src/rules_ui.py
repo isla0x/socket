@@ -11,6 +11,9 @@ from packet import validate_rules, compile_rules
 
 class RulesDialog(QDialog):
     deleted = Signal(object)
+    saved = Signal(object)
+    save_started = Signal()
+    save_failed = Signal(str)
     def __init__(self, rules, parent=None, direction='RX', contains='', embedded=False):
         super().__init__(parent)
         self.embedded = embedded
@@ -79,9 +82,10 @@ class RulesDialog(QDialog):
         if embedded:
             note.hide()
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText('저장 후 자동 치환 켜기')
+        self.save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        self.save_button.setText('저장 후 자동 치환 켜기')
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('취소')
-        buttons.accepted.connect(self.save)
+        self.save_button.clicked.connect(lambda: self.save())
         buttons.rejected.connect(self.reject)
         if embedded:
             buttons.button(QDialogButtonBox.StandardButton.Cancel).hide()
@@ -210,15 +214,17 @@ class RulesDialog(QDialog):
             self.table.selectRow(dest)
 
     def save(self):
+        self.save_started.emit()
         try:
             self.table.setFocus()  # Commit the active cell editor before reading.
             self.result_value = self.checked_rules()
             if self.embedded:
-                self.accepted.emit()
+                self.saved.emit(self.result_value)
             else:
                 self.accept()
         except (ValueError, UnicodeError) as exc:
             self.error.setText(str(exc).replace('allow_resize: true', '「길이 변경」 체크'))
+            self.save_failed.emit(self.error.text())
 
     def import_rules(self):
         path, _ = QFileDialog.getOpenFileName(self, '규칙 불러오기', '', 'JSON (*.json)')

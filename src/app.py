@@ -132,7 +132,7 @@ class JsonDialog(QDialog):
 class Window(QMainWindow):
     def __init__(self, start_demo=True):
         super().__init__()
-        self.setWindowTitle('Socket Inspector v3.2.5 — 원본 덮어쓰기')
+        self.setWindowTitle('Socket Inspector v3.2.6 — 규칙 저장 활성화')
         self.profile_state = {}
         self.active_profile = 'kyobo'
         self.resize(1720, 960)
@@ -462,7 +462,9 @@ class Window(QMainWindow):
             data_layout.addWidget(editor)
             split.addWidget(data_area)
             self.inline_rules = RulesDialog(self.rules, self, embedded=True)
-            self.inline_rules.accepted.connect(lambda: self.apply_rule_list(self.inline_rules.result_value))
+            self.inline_rules.saved.connect(self.apply_rule_list)
+            self.inline_rules.save_started.connect(lambda: self.log('규칙 저장 버튼 입력 · 검증/활성화 시작'))
+            self.inline_rules.save_failed.connect(lambda reason: self.log('규칙 저장 실패 · '+reason))
             self.inline_rules.deleted.connect(lambda rules: self.apply_rule_list(rules, activate=False))
             split.addWidget(self.inline_rules)
             split.setChildrenCollapsible(False)
@@ -777,12 +779,13 @@ class Window(QMainWindow):
             self.target.setFocus()
             return
         shinyoung = self.profile.currentData() == 'shinyoung'
+        keep_rules = self.auto_rules.isChecked() and any(r['enabled'] for r in self.rules)
         self.compatibility.setChecked(not shinyoung)
         self.spawn.setChecked(not shinyoung)
         self.capture_enabled.setChecked(True)
         self.intercept.setChecked(False)
-        self.auto_rules.setChecked(False)
-        self.log('신영: 휴대폰에서 실행한 앱에 연결 · 교보 사전 설정 미사용' if shinyoung else '교보 권장 조회 설정 적용: 사전 설정 ON · 시작하며 연결 ON · 가로채기 OFF · 자동 치환 OFF')
+        self.auto_rules.setChecked(keep_rules)
+        self.log(('신영: 실행 중인 앱에 연결 · ' if shinyoung else '교보 권장 연결 · 사전 설정/시작 ON · ')+'자동 치환 '+('ON 유지' if keep_rules else 'OFF'))
         self.connect_live()
 
     def disconnect_live(self):
@@ -1225,7 +1228,14 @@ class Window(QMainWindow):
             self.auto_rules.setChecked(any(r['enabled'] for r in self.rules))
         self.configure()
         self.inline_rules.populate(self.rules)
-        self.inline_rules.error.setText('저장 완료 · 이후 패킷부터 적용' if self.auto_rules.isChecked() else '저장 완료 · 자동 치환 OFF')
+        if self.auto_rules.isChecked() and self.backend.settings.get('rules'):
+            message=f'자동 치환 ON · 사용 규칙 {sum(r["enabled"] for r in self.rules)}개 · 이후 패킷부터 적용'
+        elif not any(r['enabled'] for r in self.rules):
+            message='자동 치환 OFF · 사용할 규칙이 없습니다. 규칙을 추가하고 사용 체크를 확인하세요.'
+        else:
+            message='자동 치환 OFF · 진단 모드 또는 설정 오류를 아래 로그에서 확인하세요.'
+        self.inline_rules.error.setText(message)
+        self.statusBar().showMessage(message,10000)
         self.log('간편 규칙 저장 · 자동 치환 '+('ON' if self.auto_rules.isChecked() else 'OFF')+' · 이후 발생하는 패킷부터 적용합니다.')
 
     def save_session(self):
