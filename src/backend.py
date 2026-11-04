@@ -10,8 +10,7 @@ from pathlib import Path
 
 import frida
 from PySide6.QtCore import QObject, Signal
-
-PC_TARGETS = {'provestkrun.exe', 'provestk.exe'}
+from windows_processes import PC_TARGETS, pc_processes, elevated, needs_elevation
 
 
 def readonly_settings(settings):
@@ -19,6 +18,17 @@ def readonly_settings(settings):
     if result.get('profile') == 'provest':
         result.update(intercept=False, rules=False, compatibility=False, compiledRules=[])
     return result
+
+
+def connection_error(error, pc=False):
+    message = str(error)
+    if pc and 'virtualalloc' in message.lower() and ('00000005' in message.lower() or '0x5' in message.lower()):
+        level = '관리자' if elevated() is True else '일반'
+        return (f'PC 메모리 할당 접근 거부(Win32 5) · 뷰어 권한: {level}. '
+                '후크 설치 전 단계에서 실패했습니다. 관리자 권한에서도 발생하면 단순 권한 차이 외의 '
+                'HTS/보안 정책 제한 가능성이 있으며 정확한 차단 원인은 아직 확인되지 않았습니다. '
+                '규칙·사전 설정 문제가 아닙니다. 원본 오류: ' + message)
+    return message
 
 
 def agent_source(config, agent_path):
@@ -83,8 +93,10 @@ class Backend(QObject):
             try:
                 device = self.device(address)
                 if address.strip().upper() == 'LOCAL':
-                    apps = device.enumerate_processes()
-                    self.applications.emit([(str(a.pid), a.name, a.pid) for a in apps if a.name.lower() in PC_TARGETS])
+                    apps = pc_processes()
+                    self.applications.emit([(str(a.pid), a.name + (' [관리자]' if elevated(a.pid) is True else ''), a.pid) for a in apps])
+                    if apps and elevated() is False and any(elevated(a.pid) is True for a in apps):
+                        self.log.emit('실행 중인 HTS는 관리자 권한입니다. PC-관리자-뷰어.cmd 또는 뷰어 우클릭 → 관리자 권한으로 실행을 사용하세요.')
                 else:
                     apps = device.enumerate_applications()
                     self.applications.emit([(a.identifier, a.name, a.pid) for a in apps])
@@ -120,13 +132,15 @@ class Backend(QObject):
                 if pc:
                     if spawn:
                         raise RuntimeError('PC 모드는 실행 중인 프로그램에만 연결합니다. 먼저 ProvestK를 직접 실행하세요.')
-                    processes = device.enumerate_processes()
+                    processes = pc_processes()
                     matches = [p for p in processes if (str(p.pid) == target if target.isdecimal() else p.name.lower() == target.lower())]
                     if len(matches) != 1:
                         raise RuntimeError('실행 중인 ProvestK를 찾지 못했거나 여러 개입니다. 「PC 프로세스 목록」에서 PID를 선택하세요.')
                     if matches[0].name.lower() not in PC_TARGETS:
                         raise RuntimeError('PC 프로필은 provestkrun.exe / provestk.exe만 지원합니다.')
                     attach_target = matches[0].pid
+                    if needs_elevation(attach_target):
+                        raise RuntimeError(f'HTS는 실행 중입니다(PID {attach_target}). HTS는 관리자 권한, 뷰어는 일반 권한입니다. PC-관리자-뷰어.cmd로 뷰어를 다시 실행하세요.')
                 elif spawn:
                     spawned_pid = device.spawn([target])
                     attach_target = spawned_pid
@@ -157,7 +171,7 @@ class Backend(QObject):
                 self.log.emit(f'Frida {frida.__version__} 연결됨 · {target}')
             except Exception as e:
                 if generation == self.generation:
-                    self.log.emit(f'연결 실패: {e}')
+                    self.log.emit('연결 실패: ' + connection_error(e, config.get('profile') == 'provest'))
                     self.connection.emit('disconnected')
                 if session:
                     try:
