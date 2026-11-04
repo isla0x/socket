@@ -11,8 +11,18 @@ from pathlib import Path
 import frida
 from PySide6.QtCore import QObject, Signal
 
+PC_TARGETS = {'provestkrun.exe', 'provestk.exe'}
+
+
+def readonly_settings(settings):
+    result = dict(settings)
+    if result.get('profile') == 'provest':
+        result.update(intercept=False, rules=False, compatibility=False, compiledRules=[])
+    return result
+
 
 def agent_source(config, agent_path):
+    config = readonly_settings(config)
     mode = config.get('diagnostic', 'capture') if config.get('profile') == 'shinyoung' else 'capture'
     if mode in ('attach', 'java'):
         source = "send({kind:'log',text:'진단 시작: 패킷 후크·치환·보호 설정 변경 없음'});\n"
@@ -21,7 +31,7 @@ def agent_source(config, agent_path):
         source += "setTimeout(function(){send({kind:'log',text:'진단: 스크립트 로드 후 10초 유지됨 · 패킷 캡처 없음'});},10000);"
         return source
     prelude_path = Path(agent_path).with_name('compat-prelude.js')
-    prelude = prelude_path.read_text(encoding='utf-8') if config.get('compatibility') and config.get('profile') != 'shinyoung' else ''
+    prelude = prelude_path.read_text(encoding='utf-8') if config.get('compatibility') and config.get('profile', 'kyobo') == 'kyobo' else ''
     return 'const BOOT_CONFIG = ' + json.dumps(config) + ';\n' + prelude + '\n' + Path(agent_path).read_text(encoding='utf-8')
 
 
@@ -50,6 +60,7 @@ class Backend(QObject):
         self.thread_stats = {}
 
     def configure(self, settings):
+        settings = readonly_settings(settings)
         with self.lock:
             self.settings = dict(settings)
             script = self.script
@@ -61,6 +72,8 @@ class Backend(QObject):
 
     @staticmethod
     def device(address):
+        if address.strip().upper() == 'LOCAL':
+            return frida.get_local_device()
         if address.strip().upper() == 'USB':
             return frida.get_usb_device(timeout=5)
         return frida.get_device_manager().add_remote_device(address.strip())
@@ -68,8 +81,13 @@ class Backend(QObject):
     def list_applications(self, address):
         def run():
             try:
-                apps = self.device(address).enumerate_applications()
-                self.applications.emit([(a.identifier, a.name, a.pid) for a in apps])
+                device = self.device(address)
+                if address.strip().upper() == 'LOCAL':
+                    apps = device.enumerate_processes()
+                    self.applications.emit([(str(a.pid), a.name, a.pid) for a in apps if a.name.lower() in PC_TARGETS])
+                else:
+                    apps = device.enumerate_applications()
+                    self.applications.emit([(a.identifier, a.name, a.pid) for a in apps])
             except Exception as e:
                 self.log.emit(f'앱 목록 조회 실패: {e}')
                 self.applications.emit([])
@@ -97,8 +115,19 @@ class Backend(QObject):
             try:
                 if frida.__version__.split('.')[0] != '16':
                     raise RuntimeError('이 agent는 Frida 16.x용입니다. requirements.txt의 버전을 사용하세요.')
-                device = self.device(address)
-                if spawn:
+                pc = config.get('profile') == 'provest'
+                device = frida.get_local_device() if pc else self.device(address)
+                if pc:
+                    if spawn:
+                        raise RuntimeError('PC 모드는 실행 중인 프로그램에만 연결합니다. 먼저 ProvestK를 직접 실행하세요.')
+                    processes = device.enumerate_processes()
+                    matches = [p for p in processes if (str(p.pid) == target if target.isdecimal() else p.name.lower() == target.lower())]
+                    if len(matches) != 1:
+                        raise RuntimeError('실행 중인 ProvestK를 찾지 못했거나 여러 개입니다. 「PC 프로세스 목록」에서 PID를 선택하세요.')
+                    if matches[0].name.lower() not in PC_TARGETS:
+                        raise RuntimeError('PC 프로필은 provestkrun.exe / provestk.exe만 지원합니다.')
+                    attach_target = matches[0].pid
+                elif spawn:
                     spawned_pid = device.spawn([target])
                     attach_target = spawned_pid
                 elif target.isdecimal():

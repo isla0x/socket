@@ -14,8 +14,9 @@ subprocess.run([
     '--name', 'SocketInspector', '--hidden-import', 'encodings.cp949',
     '--hidden-import', '_codecs_kr', '--hidden-import', '_multibytecodec',
     '--add-data', str(root / 'agent.js') + ';.',
-    '--add-data', str(root / 'agent-shinyoung.js') + ';.',
     '--add-data', str(root / 'compat-prelude.js') + ';.',
+    '--add-data', str(root / 'agent-shinyoung.js') + ';.',
+    '--add-data', str(root / 'agent-windows.js') + ';.',
     '--distpath', str(destination), '--workpath', str(root.parent / '.build' / 'cache'),
     '--specpath', str(root.parent / '.build'), str(root / 'app.py'),
 ], check=True)

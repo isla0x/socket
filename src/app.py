@@ -132,7 +132,7 @@ class JsonDialog(QDialog):
 class Window(QMainWindow):
     def __init__(self, start_demo=True):
         super().__init__()
-        self.setWindowTitle('Socket Inspector v3.2.6 — 규칙 저장 활성화')
+        self.setWindowTitle('Socket Inspector v3.3.0 — PC 조회 전용 추가')
         self.profile_state = {}
         self.active_profile = 'kyobo'
         self.resize(1720, 960)
@@ -205,6 +205,7 @@ class Window(QMainWindow):
         self.profile = QComboBox()
         self.profile.addItem('교보 · 기존 방식', 'kyobo')
         self.profile.addItem('신영 · 실기기 검증 전', 'shinyoung')
+        self.profile.addItem('교보 PC · ProvestK · 조회 전용', 'provest')
         conn.addWidget(QLabel('대상 앱'))
         conn.addWidget(self.profile)
         self.diagnostic = QComboBox()
@@ -213,6 +214,13 @@ class Window(QMainWindow):
         self.diagnostic.addItem('③ 패킷 캡처 · 기존 어댑터', 'capture')
         self.diagnostic.hide()
         conn.addWidget(self.diagnostic)
+        self.pc_source = QComboBox()
+        self.pc_source.addItem('소켓 + 평문 후보', 'both')
+        self.pc_source.addItem('소켓 원본 바이트', 'socket')
+        self.pc_source.addItem('문자열 평문 후보', 'strings')
+        self.pc_source.setToolTip('평문 후보는 확인한 32비트 LinkInfoMng.dll의 문자열 변환 지점입니다. 전체 전문이 아닐 수 있습니다.')
+        self.pc_source.hide()
+        conn.addWidget(self.pc_source)
         self.address = QComboBox()
         self.address.setEditable(True)
         self.address.addItems(['USB', '127.0.0.1:27042'])
@@ -247,7 +255,9 @@ class Window(QMainWindow):
         conn.addWidget(self.disconnect_button)
         layout.addWidget(connection)
 
-        capture = QHBoxLayout()
+        self.capture_panel = QWidget()
+        capture = QHBoxLayout(self.capture_panel)
+        capture.setContentsMargins(0,0,0,0)
         self.intercept = QCheckBox('보내기 전 편집')
         self.intercept.setChecked(False)
         self.tx = QCheckBox('요청 중단')
@@ -273,7 +283,7 @@ class Window(QMainWindow):
         self.pending_button = button('대기 패킷 보기 (0)', self.show_pending)
         capture.addWidget(self.pending_button)
         capture.addWidget(button('모두 원본 진행', self.release_all))
-        layout.addLayout(capture)
+        layout.addWidget(self.capture_panel)
         self.advanced_panel=QWidget()
         options = QHBoxLayout(self.advanced_panel)
         options.setContentsMargins(0,0,0,0)
@@ -439,6 +449,7 @@ class Window(QMainWindow):
         self.timeout.valueChanged.connect(self.configure)
         self.source.currentIndexChanged.connect(self.configure)
         self.diagnostic.currentIndexChanged.connect(self.configure)
+        self.pc_source.currentIndexChanged.connect(self.configure)
         self.edited_text.textChanged.connect(lambda: self.editor_changed('text'))
         self.edited_hex.textChanged.connect(lambda: self.editor_changed('hex'))
         self.update_stats()
@@ -467,6 +478,13 @@ class Window(QMainWindow):
             self.inline_rules.save_failed.connect(lambda reason: self.log('규칙 저장 실패 · '+reason))
             self.inline_rules.deleted.connect(lambda rules: self.apply_rule_list(rules, activate=False))
             split.addWidget(self.inline_rules)
+            self.raw_split = split
+            self.pc_info = QPlainTextEdit()
+            self.pc_info.setMinimumWidth(300)
+            self.pc_info.setReadOnly(True)
+            self.pc_info.setPlainText('PC 조회 전용\n\n1. ProvestK를 직접 실행하세요.\n2. PC 프로세스 목록에서 provestkrun.exe를 선택하세요.\n3. 연결 · 캡처 시작을 누른 뒤 프로그램에서 화면을 조회하세요.\n\n소켓 원본: 실제 송수신 API의 바이트 조각입니다. 전문 경계와 암호화 여부는 아직 해석하지 않습니다.\n\n평문 후보: 32비트 교보 DLL의 문자열 변환 입력/출력입니다. 전체 전문이 아닐 수 있으며 요청/응답은 추정입니다.\n\nPC 모드에서는 자동 치환과 전송 중단을 지원하지 않습니다.\n\n연결 실패나 종료가 발생하면 아래 로그를 확인하세요.')
+            self.pc_info.hide()
+            split.addWidget(self.pc_info)
             split.setChildrenCollapsible(False)
             split.setSizes([560,560])
             box.addWidget(split)
@@ -515,17 +533,30 @@ class Window(QMainWindow):
         settings['compatibility']=self.compatibility.isChecked()
         settings['profile']=self.profile.currentData()
         settings['diagnostic']=self.diagnostic.currentData()
+        settings['pcSource']=self.pc_source.currentData()
+        pc = settings['profile']=='provest'
+        if pc:
+            settings.update(rules=False, intercept=False, compatibility=False, compiledRules=[])
+            self.auto_rules.blockSignals(True)
+            self.auto_rules.setChecked(False)
+            self.auto_rules.blockSignals(False)
+            self.auto_rules.setEnabled(False)
+            self.intercept.setEnabled(False)
         diagnostic = settings['profile']=='shinyoung' and settings['diagnostic']!='capture'
         if diagnostic:
             settings['rules']=settings['intercept']=False
             self.capture_enabled.setText('진단 · 캡처 없음')
-        self.inline_rules.setEnabled(not diagnostic)
+        self.inline_rules.setEnabled(not diagnostic and not pc)
+        if pc:
+            self.inline_rules.error.setText('PC 조회 전용 · 치환 규칙/전송 중단은 지원하지 않습니다.')
         self.backend.configure(settings)
         self.intercept.setText('보내기 전 편집 ON' if settings['intercept'] else '보내기 전 편집 OFF')
         if self.mode=='live':
             self.mode_label.setText('LIVE · 실시간 캡처 중' if settings['capture'] else 'LIVE · 캡처 중지')
             if settings['profile']=='shinyoung' and settings['diagnostic']!='capture':
                 self.mode_label.setText('LIVE · 연결 진단 중 · 캡처 없음')
+            if pc:
+                self.mode_label.setText('LIVE · PC 조회 전용' if settings['capture'] else 'LIVE · PC 캡처 중지')
         if not settings['intercept'] and not settings['rules']:
             self.release_all()
         self.update_stats()
@@ -602,6 +633,9 @@ class Window(QMainWindow):
             self.arm_manual()
 
     def arm_manual(self):
+        if self.profile.currentData()=='provest':
+            self.log('PC 모드는 조회 전용입니다. 전송 중단을 지원하지 않습니다.')
+            return
         if self.profile.currentData() == 'shinyoung':
             self.log('신영 어댑터는 캡처·자동 치환용입니다. 간편 치환 규칙에서 설정하세요.')
             return
@@ -742,21 +776,33 @@ class Window(QMainWindow):
 
     def list_apps(self):
         self.list_apps_button.setEnabled(False)
-        self.backend.list_applications(self.address.currentText())
-        self.log('앱 목록 조회 중…')
+        self.backend.list_applications('LOCAL' if self.profile.currentData()=='provest' else self.address.currentText())
+        self.log('PC 프로세스 목록 조회 중…' if self.profile.currentData()=='provest' else '앱 목록 조회 중…')
 
     def apps_loaded(self, apps):
         self.list_apps_button.setEnabled(True)
         old = self.target.currentText()
         self.target.clear()
         for identifier, name, pid in sorted(apps, key=lambda a: (not bool(a[2]), a[1])):
-            self.target.addItem(identifier, dict(name=name, pid=pid))
+            self.target.addItem(f'{name} · PID {pid}' if self.profile.currentData()=='provest' else identifier, dict(name=name, pid=pid))
             self.target.setItemData(self.target.count()-1, f'{name} · PID {pid or "실행 안 됨"}', Qt.ItemDataRole.ToolTipRole)
-        if old:
+        if old and not (self.profile.currentData()=='provest' and apps):
             self.target.setEditText(old)
-        self.log(f'앱 목록 {len(apps)}개')
+        if self.profile.currentData()=='provest':
+            self.log(f'PC 실행 프로세스 {len(apps)}개 · 0개이면 ProvestK 실행 후 다시 조회하세요.')
+        else:
+            self.log(f'앱 목록 {len(apps)}개')
 
     def connect_live(self):
+        if self.profile.currentData()=='provest':
+            selection = self.target.currentData()
+            target = str(selection['pid']) if isinstance(selection,dict) and self.target.currentText()==self.target.itemText(self.target.currentIndex()) else self.target.currentText().strip()
+            if not target:
+                self.log('ProvestK를 실행한 뒤 PC 프로세스 목록에서 선택하세요.')
+                return
+            self.configure()
+            self.backend.connect_device('LOCAL', target, False, ASSETS / 'agent-windows.js')
+            return
         target = self.target.currentText().strip()
         if not target:
             self.target.setFocus()
@@ -773,6 +819,10 @@ class Window(QMainWindow):
         self.backend.connect_device(self.address.currentText(), target, self.spawn.isChecked(), ASSETS / agent)
 
     def connect_recommended(self):
+        if self.profile.currentData()=='provest':
+            self.capture_enabled.setChecked(True)
+            self.connect_live()
+            return
         target=self.target.currentText().strip()
         if not target or target.isdecimal():
             self.log('조회 시작에는 앱 패키지명을 입력하세요. PID 연결은 버튼 오른쪽 메뉴의 일반 연결을 사용합니다.')
@@ -806,28 +856,57 @@ class Window(QMainWindow):
         for control in (self.target, self.address, self.spawn):
             control.setEnabled(not connected)
         self.compatibility.setEnabled(not connected and self.profile.currentData() == 'kyobo')
+        pc = self.profile.currentData()=='provest'
+        self.address.setEnabled(not connected and not pc)
+        self.spawn.setEnabled(not connected and not pc)
+        self.list_apps_button.setEnabled(not connected)
+        if mode=='live' and pc:
+            self.mode_label.setText('LIVE · PC 조회 전용')
 
     def change_profile(self):
         self.profile_state[self.active_profile] = (self.rules, self.fields, self.length_fields)
         self.active_profile = self.profile.currentData()
         self.rules, self.fields, self.length_fields = self.profile_state.get(self.active_profile, ([], [], []))
         shinyoung = self.active_profile == 'shinyoung'
+        pc = self.active_profile == 'provest'
+        self.pc_source.setVisible(pc)
+        self.capture_panel.setVisible(not pc)
+        self.demo_button.setVisible(not pc)
+        self.target.lineEdit().setPlaceholderText('프로세스명 또는 PID' if pc else '앱 패키지명 / 프로세스명 / PID')
+        if pc and self.packets and all(p.origin=='demo' for p in self.packets):
+            self.clear_packets()
+        if pc and self.mode=='demo':
+            self.mode_label.setText('PC 조회 전용 · 연결 안 됨')
+        self.inline_rules.setVisible(not pc)
+        self.pc_info.setVisible(pc)
+        self.raw_split.setSizes([800,0,360] if pc else [560,560,0])
+        if pc:
+            self.statusBar().showMessage('PC 조회 전용 · 실행 중인 ProvestK에 연결하세요.')
+        self.address.setEditText('LOCAL' if pc else 'USB')
+        self.address.setEnabled(not pc)
+        self.spawn.setEnabled(not pc)
+        self.list_apps_button.setText('PC 프로세스 목록' if pc else '앱 목록')
+        self.target.clear()
         self.diagnostic.setVisible(shinyoung)
         self.diagnostic.setCurrentIndex(0)
         self.intercept.setChecked(False)
         self.auto_rules.setChecked(False)
         self.allow_resize.setChecked(False)
         self.compatibility.setChecked(False)
-        self.compatibility.setEnabled(not shinyoung)
-        self.intercept.setEnabled(not shinyoung)
-        self.source.setEnabled(not shinyoung)
-        self.spawn.setChecked(not shinyoung)
-        self.target.setEditText('com.shinyoung.mts' if shinyoung else 'kr.com.wink')
+        self.compatibility.setEnabled(not shinyoung and not pc)
+        self.intercept.setEnabled(not shinyoung and not pc)
+        self.source.setEnabled(not shinyoung and not pc)
+        self.spawn.setChecked(not shinyoung and not pc)
+        self.target.setEditText('provestkrun.exe' if pc else ('com.shinyoung.mts' if shinyoung else 'kr.com.wink'))
         self.refresh_rule_count()
         self.configure()
-        self.log('신영 선택 · 규칙 분리 · 캡처/자동 치환 어댑터는 실기기 확인이 필요합니다.' if shinyoung else '교보 선택 · 기존 후크와 이 앱의 규칙을 사용합니다.')
+        if not pc:
+            self.log('신영 선택 · 규칙 분리 · 캡처/자동 치환 어댑터는 실기기 확인이 필요합니다.' if shinyoung else '교보 선택 · 기존 후크와 이 앱의 규칙을 사용합니다.')
         self.inline_rules.populate(self.rules)
         self.inline_rules.error.clear()
+        if pc:
+            self.log('PC 조회 전용 · ProvestK를 직접 실행하고 연결하세요. 소켓은 I/O 조각이며 평문 후보는 문자열 일부일 수 있습니다.')
+            self.inline_rules.error.setText('PC 조회 전용 · 치환 규칙/전송 중단은 지원하지 않습니다.')
 
     def receive(self, meta, data):
         key = (meta['direction'],meta['stage'],hash(data))
@@ -859,7 +938,7 @@ class Window(QMainWindow):
             p.status = '대기 초과 원본'
         elif meta.get('mainThread') and meta.get('manual'):
             p.status = '메인 스레드 · 조회'
-        p.note = ', '.join(meta.get('autoNames',[])) or meta.get('ruleError','')
+        p.note = meta.get('note','') or ', '.join(meta.get('autoNames',[])) or meta.get('ruleError','')
         self.capture_sequence += 1
         p.sequence = self.capture_sequence
         self.packets.append(p)
@@ -963,6 +1042,8 @@ class Window(QMainWindow):
             actual = p.draft if p.pending else (p.final if p.final is not None else p.original)
             draft = actual[:4096] if large else actual
             self.raw_title.setText(direction + ' 데이터 · ' + ('전송 전 대기 · 직접 편집' if p.pending else ('치환 적용 결과' if p.final is not None and p.final != p.original else '치환 미적용 / 원본')))
+            if p.stage.startswith('PC · '):
+                self.raw_title.setText(direction + ' 수집 데이터 · 읽기 전용')
             self.inline_replace.setVisible(p.pending)
             self.original_text.setPlainText(visible(original, self.encoding))
             self.original_hex.setPlainText(hexdump(original))
@@ -1020,7 +1101,7 @@ class Window(QMainWindow):
             for row, f in enumerate(fields):
                 try:
                     values = [f['name'], f['offset'], f['length'], field_value(p.original, f, self.encoding), field_value(p.draft, f, self.encoding)]
-                    valid = len(p.original) <= EDIT_LIMIT
+                    valid = len(p.original) <= EDIT_LIMIT and self.profile.currentData()!='provest'
                 except ValueError:
                     values = [f['name'], f['offset'], f['length'], '범위 초과', '범위 초과']
                     valid = False
@@ -1080,9 +1161,15 @@ class Window(QMainWindow):
             self.final_button.setEnabled(False)
             self.manual_banner.setText('① 연결 → ② 다음 요청 잡기 → ③ 앱에서 작업 → ④ Raw를 직접 수정하고 전송')
             self.manual_banner.setStyleSheet('')
+            if self.profile.currentData()=='provest':
+                self.apply_button.hide()
+                self.pass_button.hide()
+                self.manual_banner.setText('PC 조회 전용 · ProvestK 실행 → PC 프로세스 목록 → 연결 · 캡처 시작 → 프로그램에서 화면 조회')
             return
         self.detail_title.setText(f'{transaction(p.original)}  ·  {"요청" if p.direction=="TX" else "응답"}')
         origin = {'demo':'가상 데이터', 'live':'실제 기기', 'import':'가져온 세션'}[p.origin]
+        if p.stage.startswith('PC · '):
+            origin = 'PC 수집'
         self.detail_meta.setText(f'{origin} · {p.id} · {p.stage} · {p.status}' + (f' · 규칙/메모: {p.note}' if p.note else ''))
         delta = len(p.draft) - len(p.original)
         changed = sum(a != b for a,b in zip(p.original,p.draft)) + abs(delta)
@@ -1132,6 +1219,11 @@ class Window(QMainWindow):
             self.manual_banner.setText('왼쪽은 전달 데이터, 오른쪽은 치환 규칙입니다. 원본은 Hex에서 확인할 수 있습니다.\n오른쪽 규칙을 저장하면 이후 발생하는 패킷에 자동 적용합니다.')
         if self.profile.currentData()=='shinyoung' and self.diagnostic.currentData()!='capture':
             self.manual_banner.setText('신영 연결 진단 · 패킷 후크와 치환은 설치하지 않습니다.\n스크립트 로드 후 10초 유지 로그와 앱 종료 여부를 확인하세요.')
+
+        if self.profile.currentData()=='provest':
+            self.apply_button.setVisible(False)
+            self.pass_button.setVisible(False)
+            self.manual_banner.setText('PC 조회 전용 · 소켓 데이터는 전문의 일부이거나 여러 전문이 합쳐진 I/O 조각일 수 있습니다.\n평문 후보는 문자열 변환 지점에서 본 일부 값이며, 요청/응답 방향은 추정입니다. · '+p.note)
 
     def tick(self):
         self.update_stats()
@@ -1212,12 +1304,18 @@ class Window(QMainWindow):
             self.log(f'실제 패킷용 필드 정의 {len(self.fields)}개 적용. DEMO에는 별도 예시 명세를 사용합니다.')
 
     def edit_rules(self):
+        if self.profile.currentData()=='provest':
+            self.log('PC 모드는 조회 전용입니다. 치환 규칙은 모바일 프로필에서 사용하세요.')
+            return
         direction = self.current.direction if self.current else 'RX'
         dialog = RulesDialog(self.rules, self, direction=direction)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.apply_rule_list(dialog.result_value)
 
     def apply_rule_list(self, rules, activate=True):
+        if self.profile.currentData()=='provest':
+            self.log('PC 조회 전용 · 치환 규칙은 적용하지 않습니다.')
+            return
         self.rules = rules
         if activate:
             self.capture_enabled.setChecked(True)
@@ -1309,11 +1407,18 @@ def main():
             QFontDatabase.addApplicationFont(str(font_dir / font_file))
     application.setFont(QFont('Malgun Gothic', 10))
     application.setStyle('Fusion')
-    window = Window()
+    window = Window(start_demo='--pc' not in sys.argv)
+    if '--pc' in sys.argv:
+        window.profile.setCurrentIndex(window.profile.findData('provest'))
     window.show()
     if '--smoke-test' in sys.argv:
         def smoke():
             try:
+                if '--pc' in sys.argv:
+                    assert window.profile.currentData()=='provest'
+                    assert not window.inline_rules.isEnabled() and not window.intercept.isEnabled()
+                    assert (ASSETS / 'agent-windows.js').is_file()
+                    window.profile.setCurrentIndex(window.profile.findData('kyobo'))
                 assert not window.intercept.isChecked()
                 window.intercept.setChecked(True)
                 window.add_demo()
